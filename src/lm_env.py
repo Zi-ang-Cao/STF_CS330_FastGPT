@@ -1,15 +1,37 @@
+import gymnasium as gym
+import numpy as np
 import torch
 import torch.nn.functional as F
 import transformers
 import utils
 
-class LMEnv:
+from fast_detect_gpt.run_detector import FastDetectGPT
 
-    def __init__(self, args):
+# args: max_sample_tokens
+# args: model_name
+
+class LMEnv:
+    def __init__(self, args, input_ids):
+        self.max_sample_tokens = args.max_sample_tokens
         self.model, self.tok = utils.get_model_and_tokenizer(args.model_name)
-        self.input_ids = None
         assert isinstance(self.model, transformers.GPT2LMHeadModel)
         self.stop_tokens = utils.stop_tokens(self.tok)
+        self._seed = None
+        self.vocab_size = len(self.tok)
+        # Current inputs and logits
+        self.input_ids = input_ids
+        self.cur_logits = None
+
+    def get_text(self):
+        return self.tok.decode(self.input_ids)
+
+    def sample_done(self):
+        return self.input_ids[-1] in self.stop_tokens or self.cur_input.shape[1] >= self.max_sample_tokens
+
+    def reset(self, new_input_ids):
+        self.input_ids = new_input_ids
+        self.cur_logits = None
+        # TODO:Clear model cache
 
     def do_sample(
         self,
@@ -41,9 +63,63 @@ class LMEnv:
         # (Seq Len, Batch Size=1, Vocab Size)
         new_logits = torch.stack(cum_logits, dim=0) 
         return new_tokens, new_logits
+    
+    def step(self, perturb=False, perturb_token=-1.):
+        if perturb:
+            self.input_ids = torch.cat(self.input_ids, torch.tensor(perturb_token).unsqueeze(dim=0), dim=1)
+            logits = torch.zeros(self.vocab_size).float32()
+            logits[perturb_token] = 1.
+            self.cur_logits = logits.numpy()
+        else:
+            new_tokens, new_logits = self.do_sample(max_tokens=1)
+            self.cur_logits = new_logits[-1, 0, :].numpy()
+            self.input_ids = new_tokens
 
-    def step():
-        new_tokens, new_logits = self.do_sample(max_tokens=1)
-        self.input_ids = new_tokens
 
+class FGPTEnv(gym.Env):
+
+    def __init__(self, args):
+        self._seed = None
+        # Environment
+        self._env = LMEnv(args)
+        # Detector
+        self._detector = FastDetectGPT(args)
+        # This will be the logits 
+        self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.vocab_size,), dtype=np.float32)
+        # Action Space, whether perturb or not
+
+
+    def step(self, action):
+        """
+        :param action: One token selected from the token logits
+        """
+        if action["perturb"]:
+            self._env.step(perturb=True, perturb_token=action["perturb_token"])
+        else:
+            self._env.step(perturb=False)
+        
+        observation = self._get_obs()
+        rewards = -self._detector.infer(self._env.get_text())
+        done = self._env.sample_done()
+        info = None
+
+    	# Within the same sentence, process the next word
+        return observation, rewards, done, info
+
+    def reset(self):
+    	# Start a new sentence
+        # self.env.reset()
+        return self._get_obs()
+
+    def close(self):
+    	# Remove the entire FGPT_ENV from GPU
+        # print("Closing environment")
+        # self.env.close()
         pass
+
+    def seed(self, seed=None):
+        self._seed = np.random.seed(0)
+
+    # Private methods
+    def _get_obs(self):
+        return self._env.cur_logits.astype(np.float32)
