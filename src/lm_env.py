@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import transformers
+from typing import List
 import utils
 
 from fast_detect_gpt.run_detector import FastDetectGPT
@@ -11,7 +12,7 @@ from fast_detect_gpt.run_detector import FastDetectGPT
 # args: model_name
 
 class LMEnv:
-    def __init__(self, args, input_ids):
+    def __init__(self, args, initial_text):
         self.max_sample_tokens = args.max_sample_tokens
         self.model, self.tok = utils.get_model_and_tokenizer(args.model_name)
         assert isinstance(self.model, transformers.GPT2LMHeadModel)
@@ -19,13 +20,14 @@ class LMEnv:
         self._seed = None
         self.vocab_size = len(self.tok)
         # Current inputs and logits
-        self.input_ids = input_ids
+        self.input_ids = self.tok(initial_text, return_tensors="pt")["input_ids"]
         self.cur_logits = None
 
     def get_text(self):
-        return self.tok.decode(self.input_ids)
+        return self.tok.decode(torch.squeeze(self.input_ids, dim=0))
 
     def sample_done(self):
+        #TODO: give more stop tokens
         return self.input_ids[-1] in self.stop_tokens or self.cur_input.shape[1] >= self.max_sample_tokens
 
     def reset(self, new_input_ids):
@@ -78,10 +80,10 @@ class LMEnv:
 
 class FGPTEnv(gym.Env):
 
-    def __init__(self, args):
+    def __init__(self, args, initial_text):
         self._seed = None
         # Environment
-        self._env = LMEnv(args)
+        self._env = LMEnv(args, initial_text)
         # Detector
         self._detector = FastDetectGPT(args)
         # This will be the logits 
@@ -118,7 +120,8 @@ class FGPTEnv(gym.Env):
         pass
 
     def seed(self, seed=None):
-        self._seed = np.random.seed(0)
+        if seed:
+            self._seed = np.random.seed(seed)
 
     # Private methods
     def _get_obs(self):

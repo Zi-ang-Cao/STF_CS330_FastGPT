@@ -1,9 +1,6 @@
 import torch
 import transformers
-
-# Return a model given arguments
-def get_model(args):
-    pass
+from typing import List
 
 def model2hfname(model: str) -> str:
     return {
