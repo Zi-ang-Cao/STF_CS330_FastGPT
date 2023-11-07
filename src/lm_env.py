@@ -68,7 +68,7 @@ class LMEnv:
     
     def step(self, perturb=False, perturb_token=-1.):
         if perturb:
-            self.input_ids = torch.cat(self.input_ids, torch.tensor(perturb_token).unsqueeze(dim=0), dim=1)
+            self.input_ids = torch.cat(self.input_ids, torch.tensor(perturb_token).unsqueeze(dim=0).unsqueeze(dim=0), dim=1)
             logits = torch.zeros(self.vocab_size).float32()
             logits[perturb_token] = 1.
             self.cur_logits = logits.numpy()
