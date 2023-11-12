@@ -61,7 +61,7 @@ class LMEnv:
                 past_kvs = outputs.past_key_values
                 n += 1
         # (Batch Size=1, Input + Output Seq Len)
-        new_tokens = torch.cat((self.input_ids, torch.tensor(sampled_tokens).unsqueeze(dim=0)), dim=1) 
+        new_tokens = torch.cat((self.input_ids, torch.tensor(sampled_tokens).long().unsqueeze(dim=0)), dim=1) 
         # (Seq Len, Batch Size=1, Vocab Size)
         new_logits = torch.stack(cum_logits, dim=0) 
         return new_tokens, new_logits
