@@ -53,7 +53,7 @@ class LMEnv:
                 if sampling_mode == "argmax":
                     sampled_token = torch.argmax(local_logits, dim=-1)
                 elif sampling_mode == "likelihood":
-                    sampled_token = torch.multinomial(F.softmax(local_logits, dim=-1), num_samples=1)
+                    sampled_token = torch.multinomial(F.softmax(local_logits, dim=-1), num_samples=1).squeeze(dim=1)
                 if sampled_token[0].item() in self.stop_tokens:
                     break
                 sampled_tokens.append(sampled_token[0])
