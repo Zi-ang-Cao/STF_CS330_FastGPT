@@ -10,77 +10,13 @@ algorithm = "PPO"
 
 
 import gymnasium as gym
+import tqdm
 # import gym
-### Baseline
-data = sampled_dataset("xsum", 2048, 42)
-
-score_list = []
-for i in data:
-    answer = completion(i, 10)
-    score = infer(answer)
-    score_list.append(score)
-
-print("Average Score: ", np.mean(score_list))
-print("Max Score: ", np.max(score_list))
-
-
-### RuleBased
-a_list = [0.3, 0.35, 0.4]
-rulebased_score_dict = {}
-for a in a_list:
-    rulebased_dict = {}
-    score_list = []
-    perturb_list = []
-    for i in data:
-        n_perturb = 0
-        # select i_th data
-        logits = get_obs(i)[-1]
-        for t in range(10000):
-            # get sorted topK logits
-            topK_logits, topK_items = get_topK_logits(logits, 10)
-            if topK_items in stop_tokens:
-                break
-            else:
-                if softmax(topK_logits, -1) > a:
-                    next_token = topK_items[2]
-                    n_perturb += 1
-        # get the final score for this data
-        score = infer(answer)
-        score_list.append(score)
-        # get the number of perturbations for this data
-        perturb_list.append(n_perturb)
-        # save to dict
-        rulebased_dict = {
-            "score": score_list,
-            "perturb": perturb_list
-        }
-
-    # Compute the average reward
-    reward = (score_baseline - np.mean(score_list) )* 100 - np.mean(perturb_list)
-    # save to dict
-    rulebased_score_dict = {
-        "a": a,
-        "reward": reward,
-        "dict": rulebased_dict
-        "mean_score": np.mean(score_list),
-    }
-
-## RL
-
-
-
-
-
-            
-        
-    print("Average Score: ", np.mean(score_list))
-    print("Max Score: ", np.max(score_list))
-
 
 
 class LMEnv(gym.Env):
-    def __init__(self, sampling_mode: str = "likelihood", topK_logistics: int=5, dataset: str="xsum", n_train:int = 2048, 
-    random_seed:int=42, obs_dim:int = 10):
+    def __init__(self, sampling_mode: str = "likelihood", topK_logistics: int=10, dataset: str="xsum", n_train:int = 8, 
+    random_seed:int=42, obs_dim:int = 1):
 
         # Dataset
         self.random_seed = random_seed
@@ -99,22 +35,18 @@ class LMEnv(gym.Env):
         self._seed = None
         self.vocab_size = len(self.tok)
         # Current inputs and logits
-        self.initial_text = self._get_new_input()
         self.past_kvs = None
         self.topK_logistics = topK_logistics
 
         self.sampling_mode = sampling_mode  # "likelihood" or "argmax"
-        self.purturb_mode = "argmax"
         self.input_ids = None
 
         ## RL: Basic Action Space and Obs Space
-        # The first integer can take values 0 or 1 (2 possibilities)
-        # The second integer can take values 1 to 10 (10 possibilities)
-        # self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics])
-        # self.action_space = gym.spaces.MultiDiscrete([self.topK_logistics])
+        # Whether perturb or not.
+        # If not perturb: sample by multinomial
+        # If perturb: sample by equal probability
         self.obs_dim = obs_dim
-        self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics])
-
+        self.action_space = gym.spaces.Discrete(2)
 
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.obs_dim, self.topK_logistics), dtype=np.float32)
 
@@ -174,7 +106,7 @@ class LMEnv(gym.Env):
         new_input_ids = self._cat_new_word(new_token)
         return new_token, new_input_ids
          
-    def _perturb_tokens(self, local_logits, perturb_ranking):
+    def _perturb_tokens(self, local_logits, perturb_mode="chosen", perturb_ranking=-1):
         """
         :param local_logits: tensor shape [batch_size, vocab_size] local logits at the last point
         :param perturb_ranking: perturb selection of the last word
@@ -182,11 +114,18 @@ class LMEnv(gym.Env):
         :return new_input_ids: the new input ids after the perturbation
         """
         # Get the top k predictions （1-10）
-        _, topk_indices = torch.topk(local_logits, perturb_ranking)
-        # Select the last item
-        new_token = topk_indices[0][-1]
-        new_input_ids = self._cat_new_word(new_token)
-        return new_token, new_input_ids
+        if perturb_mode == "chosen":
+            _, topk_indices = torch.topk(local_logits, perturb_ranking)
+            # Select the last item
+            new_token = topk_indices[0][-1]
+            new_input_ids = self._cat_new_word(new_token)
+            return new_token, new_input_ids
+        else:
+            _, topk_indices = torch.topk(local_logits, 10)
+            # Select random item
+            new_token = topk_indices[0][random.randint(0, 9)]
+            new_input_ids = self._cat_new_word(new_token)
+            return new_token, new_input_ids
 
     def _obs_wrapper(self, all_logits):
         # Sorted topk_values
@@ -211,21 +150,26 @@ class LMEnv(gym.Env):
         else:
             raise NotImplementedError
 
-    def _get_new_input(self):
-        return self.data[np.random.randint(self.n_train)].replace('\n', ' ')
+    def _get_new_input(self, item):
+        return self.data[item].replace('\n', ' ')
     
     def _sample_done(self):
         a = self.input_ids[0][-1] in self.stop_tokens
         b = self.input_ids.shape[1] >= self.max_sample_tokens
         return a or b
     
-    def reset(self, seed: int = None):
-        print("Resetting environment=============")
+    def _reset(self, random=True, data_item=-1):
+        if random:
+            self.data_item = np.random.randint(self.n_train)
+        else:
+            self.data_item = data_item
         ## Get a new generate starting point
-        initial_text = self._get_new_input()
+        initial_text = self._get_new_input(self.data_item)
         self.input_ids = self.tok(initial_text, return_tensors="pt")["input_ids"].to(env_device)
-        while self.input_ids.shape[-1] ==0:
-            initial_text = self._get_new_input()
+        self.num_perturb = 0
+        while random and self.input_ids.shape[-1] ==0:
+            self.data_item = np.random.randint(self.n_train)
+            initial_text = self._get_new_input(self.data_item)
             self.input_ids = self.tok(initial_text, return_tensors="pt")["input_ids"].to(env_device)
         ## First 1 step
         all_logits, new_past_kvs = self._feedforward(self.input_ids)
@@ -235,67 +179,34 @@ class LMEnv(gym.Env):
 
         _, new_input_ids = self._sample_tokens(local_logits)
         self.input_ids = new_input_ids
+        self.initial_input_ids = self.input_ids
 
         obs = self._obs_wrapper(all_logits)
 
-        # reset_info = None  # or reset_info = {} if you prefer
-        reset_info = {"TimeLimit.truncated": False,}  # or reset_info = {} if you prefer
+        reset_info = {"TimeLimit.truncated": False,
+                      "DataItem": self.data_item}  
         return obs, reset_info
+    
+    def reset(self, seed: int = None):
+        # print("Resetting environment=============")
+        return self._reset(random=True, data_item=-1)
         # return obs
 
     def get_text(self):
         return self.tok.decode(torch.squeeze(self.input_ids, dim=0))
-
-    def step(self, action):
-        reward = 0.
-        # Parse Action
-        perturb = action[0]
-        ## perturb_ranking: 10 options -- shift the choice from 0-9 toward 1-10
-        perturb_ranking = action[1] + 1
-
-        # ## perturb_ranking: 10 options -- shift the choice from 0-9 toward 1-10
-        # perturb_ranking = action[1] + 1
-
+    
+    def _step_sample(self, perturb):
         sampled_token, sampled_output = self._sample_tokens(self.last_logits)
 
         if not perturb:
             self.input_ids = sampled_output
             cur_input = sampled_token
-            # print("Raw: ", reward)
-            prob_drop = 0.
-            sampled_score = 0.
-            perturbed_score = 0.
         else:
-            reward -= 1. # Cost of applying perturb
-            # TODO(ziangcao): better give a large value instead of 1
-            _, perturbed_output = self._perturb_tokens(self.last_logits, perturb_ranking)
-
-            # Record Scores -- prob
-            print()
-            sampled_score = detector.infer(self.tok.decode(torch.squeeze(sampled_output, dim=0)))
-            perturbed_score = detector.infer(self.tok.decode(torch.squeeze(perturbed_output, dim=0)))
-
-            assert sampled_score>=0
-            assert perturbed_score>=0
-
-            reward += (sampled_score-perturbed_score) * 100. # Benefits of applying perturb
+            _, perturbed_output = self._perturb_tokens(self.last_logits, perturb_mode="random")
 
             self.input_ids = perturbed_output
             cur_input = self.input_ids
             self.past_kvs = None
-
-            # print("Perturbed: ", reward)
-        
-
-        idx = self.input_ids.shape[1]
-        prob_drop = sampled_score-perturbed_score
-
-        self.writer.add_scalar("perturb", perturb, idx)
-        self.writer.add_scalar("reward", reward, idx)
-        self.writer.add_scalar("Prob_Drop", prob_drop, idx)
-        self.writer.add_scalar("sampled_score", sampled_score, idx)
-        self.writer.add_scalar("perturbed_score", perturbed_score, idx)
-
 
         ## GET NEW OBS
         all_logits, new_past_kvs = self._feedforward(cur_input, self.past_kvs)
@@ -303,11 +214,33 @@ class LMEnv(gym.Env):
         self.last_logits = local_logits
         self.past_kvs = new_past_kvs
 
-        obs = self._obs_wrapper(all_logits)
+        return self._obs_wrapper(all_logits)
 
-        info = {"TimeLimit.truncated": False,}
+    def step(self, action):
+        reward = 0.
+        if action:
+            self.num_perturb += 1
+            # Negative reward grows by O(N^2)
+            reward -= 0.1 * self.num_perturb
+        # Parse Action
+        obs = self._step_sample(perturb=action)
 
         done = self._sample_done()
+
+        if done:
+            perturbed_score = detector.infer(self.get_text())
+
+            self._reset(random=False, data_item=self.data_item)
+            while not self._sample_done():
+                self._step_sample(perturb=False)
+            
+            unperturbed_score = detector.infer(self.get_text())
+            # perturbed_scores.append(perturbed_score)
+            # percent_perturb = num_perturb * 1.0/tot
+            # percent_purturbs.append(percent_perturb)
+            reward += 10000. * (unperturbed_score - perturbed_score)
+
+        info = {"TimeLimit.truncated": False,}
 
         # If your environment does not have a concept of truncation, you can set truncated to the same value as done
         truncated = done
@@ -317,9 +250,33 @@ class LMEnv(gym.Env):
     
     def seed(self, seed=None):
         self._seed = seed
-        pass
     
+def manual_policy(env: LMEnv, threshold = 0.55, chosen = 2, num_samples = 100):
+    rewards = []
 
+    pbar = tqdm.tqdm(range(num_samples))
+    for _ in pbar: 
+        num_perturb = 0
+        tot = 0
+        reward = 0.
+        while tot == 0:
+            obs, _ = env.reset()
+            while not env._sample_done():
+                tot += 1
+                if obs[-1][0] > threshold:
+                    num_perturb += 1
+                    obs, local_reward, _, _, _ = env.step((True, chosen))
+                else:
+                    obs, local_reward, _, _, _ = env.step((False, -1))
+                reward += local_reward
+        
+        pbar.set_description(f"Reward: {reward:.04f}")
+        rewards.append(reward)
+    print("Rewards Mean: ", np.mean(rewards), "Std: ", np.std(rewards))
+
+def train_manual_policy():
+    env = LMEnv(sampling_mode="likelihood")
+    manual_policy(env)
 
 
 from stable_baselines3 import PPO, SAC
@@ -352,12 +309,14 @@ def init_env_for_agent_training(n_envs: int=1):
     else:
         return SubprocVecEnv([make_env for _ in range(n_envs)])
 
+
+
 ############################################
 
-vec_env = init_env_for_agent_training()
+vec_env = init_env_for_agent_training(n_envs=1)
 
 if algorithm=="PPO":
     model = PPO("MlpPolicy", vec_env, verbose=1, 
                 tensorboard_log="./tensorboard_log")
-    model.learn(total_timesteps=2E5, tb_log_name=f"{algorithm}/old_ActionSpace_MLogits")
+    model.learn(total_timesteps=6E5, tb_log_name=f"{algorithm}/fixedACT")
     # model.save("FirstAgent")

@@ -15,8 +15,14 @@ inference = False
 save = False
 # If true, use both reward. Otherwise, only rule reward.
 both_reward = True
-# Tensorboard log names
-RL_model_name = "fixedACT_MONITOR_bothReward"
+
+rulePenaltyOnly = True
+
+InStepScore = True
+
+InStepPerturbCost = True
+
+RL_model_name = "GPT_MONITOR_InStepScore_InStepPerturbCost"  # Add on both_reward, rulePenaltyOnly
 # "fixedACT_MONITOR_onlyRuleReward"
 
 
@@ -198,6 +204,9 @@ class LMEnv(gym.Env):
         self.input_ids = new_input_ids
         self.initial_input_ids = self.input_ids
 
+        # NEW
+        self.input_ids_noPerturb = new_input_ids
+
         obs, _ = self._obs_wrapper(all_logits)
 
         ## NOTE: save the past obs
@@ -218,13 +227,20 @@ class LMEnv(gym.Env):
 
     def get_text(self):
         return self.tok.decode(torch.squeeze(self.input_ids, dim=0))
+
+    def get_text_noPerturb(self):
+        return self.tok.decode(torch.squeeze(self.input_ids_noPerturb, dim=0))
     
     def _step_sample(self, perturb):
         sampled_token, sampled_output = self._sample_tokens(self.last_logits)
+        # NEW
+        self.input_ids_noPerturb = sampled_output
 
         if not perturb:
             self.input_ids = sampled_output
             cur_input = sampled_token
+
+            
         else:
             # _, perturbed_output = self._perturb_tokens(self.last_logits, perturb_mode="random")
 
@@ -257,20 +273,42 @@ class LMEnv(gym.Env):
         # Parse Action
         obs, done = self._step_sample(perturb=action)
 
+        if rulePenaltyOnly:
+            Upper_threshold = 0.7
+            gain = 0
+        else:
+            Upper_threshold = 0.55
+            gain = 1
+
         if not done:
             if action:
                 self.num_perturb += 1
                 # NOTE: In-step reward
                 if self.past_obs[-1][0] > 0.55:
-                    reward += 1
+                    reward += gain
                 else:
                     reward -= 1
+                ############################
+                ### NEW ###
+                if InStepScore:
+                    perturbed_score = detector.infer(self.get_text())
+                    unperturbed_score = detector.infer(self.get_text_noPerturb())
+                    F_GPT_Score_drop = 100. * (unperturbed_score - perturbed_score)
+                    reward += 1 * F_GPT_Score_drop
+
+                    if InStepPerturbCost:
+                        reward -= 1
+                ############################
             else:
-                # NOTE: In-step reward
-                if self.past_obs[-1][0] > 0.55:
+                # NOTE: In-step reward -- ANOTHER THRESHOLD 0.7
+                if self.past_obs[-1][0] > Upper_threshold:
                     reward -= 1
                 else:
-                    reward += 1
+                    reward += gain
+        
+            
+
+            
 
         ## NOTE: save the past obs
         self.past_obs = obs
@@ -311,7 +349,7 @@ class LMEnv(gym.Env):
                 "RL_num_perturb": RL_num_perturb,
                 "last_reward": fake_reward,
                 }
-
+        
         if both_reward:
             reward = fake_reward
 
@@ -403,8 +441,6 @@ class CustomMonitor(Monitor):
         obs, reward, done, truncated, info = super().step(action)
 
         if done:
-            # Why I need to store information in info["episode"]
-            # https://github.com/DLR-RM/stable-baselines3/blob/c8fda060d4bcb283eea6ddd385be5a46a54d3356/stable_baselines3/common/base_class.py#L452
             info["episode"]["F_GPT_Score_drop"] = info.get('F_GPT_Score_drop')
             info["episode"]["RL_num_perturb"] = info.get('RL_num_perturb')
             info["episode"]["last_reward"] = info.get('last_reward')
@@ -424,8 +460,6 @@ class TensorboardCallback(BaseCallback):
     def _on_step(self) -> bool:
         # Log scalar value (here a random variable)
         # success_rate = self.training_env.get_success_rate(window_size=100)
-        # import pdb; pdb.set_trace();
-
         if len(self.model.ep_info_buffer) > 0 and len(self.model.ep_info_buffer[0]) > 0:
             # import pdb; pdb.set_trace()
             F_GPT_Score_drop = safe_mean([ep_info["F_GPT_Score_drop"] for ep_info in self.model.ep_info_buffer])
@@ -439,6 +473,9 @@ class TensorboardCallback(BaseCallback):
             self.logger.record("rollout/last_reward", last_reward)
 
         return True
+        
+        # return False
+        
 
 cust_callback = TensorboardCallback()
 
@@ -453,8 +490,8 @@ if algorithm=="PPO":
     model = PPO("MlpPolicy", vec_env, verbose=1, 
                 tensorboard_log="./tensorboard_log")
     model.learn(total_timesteps=6E5, tb_log_name=f"{algorithm}/{RL_model_name}", 
-    # model.learn(total_timesteps=6E6, tb_log_name=f"{algorithm}/{RL_model_name}", 
-                callback=cust_callback, log_interval=1)
+                callback=cust_callback)
+                # )
     if save:
         model.save(f"{algorithm}/{RL_model_name}")
     
