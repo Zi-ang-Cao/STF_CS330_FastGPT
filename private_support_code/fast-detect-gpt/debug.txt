@@ -1,0 +1,29 @@
+Loading model gpt2...
+Moving model to GPU...DONE (0.13s)
+ProbEstimator: total 1800 samples.
+Local demo for Fast-DetectGPT, where the longer text has more reliable result.
+
+Dataset: xsum
+Stop tokens: [13, 764]
+Ignore tokens: [198]
+Ignore tokens replaced by: [220]
+Using cuda device
+Logging to ./tensorboard_log/PPO/S_0_test_Reward_1203_162122_1
+huggingface/tokenizers: The current process just got forked, after parallelism has already been used. Disabling parallelism to avoid deadlocks...
+To disable this warning, you can either:
+	- Avoid using `tokenizers` before the fork if possible
+	- Explicitly set the environment variable TOKENIZERS_PARALLELISM=(true | false)
+----------------------------------
+| rollout/            |          |
+|    F_GPT_Score_drop | -2.16    |
+|    RL_num_perturb   | 16.8     |
+|    ep_len_mean      | 34       |
+|    ep_rew_mean      | -14.7    |
+|    last_reward      | -24      |
+| time/               |          |
+|    fps              | 30       |
+|    iterations       | 1        |
+|    time_elapsed     | 67       |
+|    total_timesteps  | 2048     |
+----------------------------------
+["Mark Mercer, 47, of Toll Bar Houses, Workington, is accused of taking??1,530 from Maryport Post Office on Monday as well as several firearms offences. No pleas were entered during a brief hearing at Carlisle Magistrates' Court and Mr Mercer was remanded in custody. A 24-year-old woman also arrested in connection with the raid has been released on bail until 14 March. "]

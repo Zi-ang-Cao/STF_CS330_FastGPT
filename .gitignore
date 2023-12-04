@@ -1,5 +1,10 @@
 cache/
 
-
 *.pyc
 *.zip
+
+*.pt
+
+BackUP/
+Important_Scripts/
+model_checkpoints/
