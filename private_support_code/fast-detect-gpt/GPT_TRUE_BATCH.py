@@ -86,19 +86,6 @@ class LMEnv(gym.Env):
 
         self.reset()
 
-    def _load_datasets(self):
-        print("Dataset:", self.dataset)
-        if self.dataset == "xsum":
-            d = datasets.load_dataset(self.dataset, split="train").shuffle(seed=self.random_seed)
-            filter_fn = lambda rows: [
-                len(a.split(" ")) < 100 for a in rows["document"]
-            ]
-            d = d.filter(filter_fn, batched=True, batch_size=None)
-            d = d["document"][:self.n_train]
-            self.data = d
-        else:
-            raise NotImplementedError
-
     def _feedforward(self, cur_input, past_kvs=None):
         # Change 1: Speed up feedforward by utilizing past_kvs
         """
@@ -185,6 +172,19 @@ class LMEnv(gym.Env):
         topk_values = F.softmax(topk_values, dim=-1)
 
         return topk_values.detach().cpu().numpy(), topk_indices.detach().cpu().numpy()
+
+    def _load_datasets(self):
+        print("Dataset:", self.dataset)
+        if self.dataset == "xsum":
+            d = datasets.load_dataset(self.dataset, split="train").shuffle(seed=self.random_seed)
+            filter_fn = lambda rows: [
+                len(a.split(" ")) < 100 for a in rows["document"]
+            ]
+            d = d.filter(filter_fn, batched=True, batch_size=None)
+            d = d["document"][:self.n_train]
+            self.data = d
+        else:
+            raise NotImplementedError
 
     def _get_new_input(self, items):
         ret = []
