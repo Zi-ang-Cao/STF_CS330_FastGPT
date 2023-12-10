@@ -1,4 +1,50 @@
 # STF_CS330_FastGPT
+
+## Setup
+```Shell
+# Download the latest Linux installer via wget
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O Miniconda3-latest-Linux-x86_64.sh
+
+# Execute .sh 
+bash Miniconda3-latest-Linux-x86_64.sh
+# After installation, open a new terminal or run `source ~/.bashrc` to activate the conda env.
+
+# Change the install path to /home/ziangcao2022/workspace/miniconda3
+```
+
+```Shell
+# Open a new Terminal, make sure you are in the (base) conda env
+conda env list
+
+# Create F_GPT conda env
+conda create -n F_GPT python==3.9 -y
+
+```
+
+* [Recurrent PPO](https://sb3-contrib.readthedocs.io/en/master/modules/ppo_recurrent.html)
+```Shell
+### TRY Recurrent PPO via sb3-contrib
+pip install sb3-contrib
+
+```
+
+
+```Shell
+
+
+ipython -c "%run /home/ziangcao2022/workspace/CS330/STF_CS330_FastGPT/src/gpt-new_action.ipynb"
+
+
+
+ipython -c "%run /scratch/ziang/round-10/projects/Trojan_Competition/src/Apply_noise/store_titration.ipynb"
+
+export CUDA_VISIBLE_DEVICES=6; ipython -c "%run /scratch/ziang/round-10/projects/Trojan_Competition/src/Apply_noise/store_titration.ipynb"
+
+```
+
+
+
+##
 * I tried to bypass the env_wrapper and direct integrate with F_GPT or un-structured simulator, the most standard agent RL algorithm will not be that easy to plug in. The challenges are listed below:
 	- I believe we still need an env_wrapper, I provide my MetaDrive_Wrapper to help understand.
 	- Typically, we can ask RL algo to run as many episodes as we want. However, i do not know how to integral this with we the LLM dataset...

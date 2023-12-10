@@ -64,7 +64,8 @@ def load_tokenizer(model_name, for_dataset, cache_dir):
         if '13b' in model_fullname:
             base_tokenizer.pad_token_id = 0
     return base_tokenizer
-
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, precision_recall_curve, auc
 
 import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, precision_recall_curve, auc
@@ -86,7 +87,6 @@ def get_precision_recall_metrics(real_preds, sample_preds):
                                                   real_preds + sample_preds)
     pr_auc = auc(recall, precision)
     return precision.tolist(), recall.tolist(), float(pr_auc)
-
 import random
 
 import numpy as np
@@ -95,9 +95,6 @@ import torch.nn.functional as F
 import tqdm
 import argparse
 import json
-
-
-
 
 def get_samples(logits, labels):
     assert logits.shape[0] == 1
@@ -306,7 +303,7 @@ def get_model_and_tokenizer(model: str, Cls = transformers.AutoModelForCausalLM,
     return m, tok
 
 
-def stop_tokens(tokenizer, stop_strings: Set[str] = set(".")) -> List[int]:
+def stop_tokens(tokenizer, stop_strings: Set[str] = set([])) -> List[int]:
     tokens = []
     for idx in range(len(tokenizer)):
         if tokenizer.decode(idx) in stop_strings:
@@ -336,4 +333,3 @@ def top_k_logits(logits, k):
     values, _ = torch.topk(logits, k)
     min_values = values[:, -1]
     return torch.where(logits < min_values, torch.ones_like(logits, dtype=logits.dtype) * -1e10, logits)
-

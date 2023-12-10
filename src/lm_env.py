@@ -10,6 +10,8 @@ from fast_detect_gpt.run_detector import FastDetectGPT
 
 # args: max_sample_tokens
 # args: model_name
+# args: dataset (name)
+# args: n_train
 
 class LMEnv:
     def __init__(self, args, initial_text):
@@ -20,8 +22,11 @@ class LMEnv:
         self._seed = None
         self.vocab_size = len(self.tok)
         # Current inputs and logits
-        self.input_ids = self.tok(initial_text, return_tensors="pt")["input_ids"]
         self.cur_logits = None
+        self.dataset = args.dataset
+        self.n_train = args.n_train
+        self.load_datasets()
+        self.reset()
 
     def get_text(self):
         return self.tok.decode(torch.squeeze(self.input_ids, dim=0))
@@ -29,9 +34,14 @@ class LMEnv:
     def sample_done(self):
         #TODO: give more stop tokens
         return self.input_ids[-1] in self.stop_tokens or self.cur_input.shape[1] >= self.max_sample_tokens
+    
+    def get_new_input(self):
+        return self.data[np.random.randint(self.n_train)]
 
-    def reset(self, new_input_ids):
-        self.input_ids = new_input_ids
+    def reset(self):
+        self.data = utils.load_datasets(self.dataset)
+        self.initial_text = self.get_new_input()
+        self.input_ids = self.tok(self.initial_text, return_tensors="pt")["input_ids"]
         self.cur_logits = None
         # TODO:Clear model cache
 
@@ -66,10 +76,13 @@ class LMEnv:
         new_logits = torch.stack(cum_logits, dim=0) 
         return new_tokens, new_logits
     
-    def step(self, perturb=False, perturb_token=-1.):
+    def step(self, action):
+        perturb = action[0]
+        perturb_token = action[1]
+
         if perturb:
-            self.input_ids = torch.cat(self.input_ids, torch.tensor(perturb_token).unsqueeze(dim=0).unsqueeze(dim=0), dim=1)
-            logits = torch.zeros(self.vocab_size).float32()
+            self.input_ids = torch.cat((self.input_ids, torch.tensor(perturb_token).unsqueeze(dim=0).unsqueeze(dim=0)), dim=1).long()
+            logits = torch.zeros(self.vocab_size).float()
             logits[perturb_token] = 1.
             self.cur_logits = logits.numpy()
         else:

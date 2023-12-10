@@ -46,7 +46,7 @@ class LMEnv(gym.Env):
         ## RL: Basic Action Space and Obs Space
         # The first integer can take values 0 or 1 (2 possibilities)
         # The second integer can take values 1 to 10 (10 possibilities)
-        # self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics])
+        # self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics-1])
         self.action_space = gym.spaces.MultiDiscrete([self.topK_logistics])
 
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1, self.topK_logistics), dtype=np.float32)
@@ -109,9 +109,9 @@ class LMEnv(gym.Env):
         :return new_input_ids: the new input ids after the perturbation
         """
         # Get the top k predictions （1-10）
-        _, topk_indices = torch.topk(local_logits, perturb_ranking)
+        _, topk_indices = torch.topk(local_logits, self.topK_logistics)
         # Select the last item
-        new_token = topk_indices[0][-1]
+        new_token = topk_indices[0][perturb_ranking]
         new_input_ids = self._cat_new_word(new_token)
         return new_token, new_input_ids
 
@@ -177,7 +177,7 @@ class LMEnv(gym.Env):
         ## perturb: Binary variable perturb -- either 1 or 0
         perturb = (act != 0)
 
-        perturb_ranking = act + 1
+        perturb_ranking = act
 
         # ## perturb_ranking: 10 options -- shift the choice from 0-9 toward 1-10
         # perturb_ranking = action[1] + 1

@@ -45,10 +45,10 @@ class LMEnv(gym.Env):
         ## RL: Basic Action Space and Obs Space
         # The first integer can take values 0 or 1 (2 possibilities)
         # The second integer can take values 1 to 10 (10 possibilities)
-        # self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics])
+        # self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics-1])
         # self.action_space = gym.spaces.MultiDiscrete([self.topK_logistics])
         
-        self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics])
+        self.action_space = gym.spaces.MultiDiscrete([2, self.topK_logistics-1])
 
 
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(1, self.topK_logistics), dtype=np.float32)
@@ -111,9 +111,9 @@ class LMEnv(gym.Env):
         :return new_input_ids: the new input ids after the perturbation
         """
         # Get the top k predictions （1-10）
-        _, topk_indices = torch.topk(local_logits, perturb_ranking)
+        _, topk_indices = torch.topk(local_logits, self.topK_logistics)
         # Select the last item
-        new_token = topk_indices[0][-1]
+        new_token = topk_indices[0][perturb_ranking]
         new_input_ids = self._cat_new_word(new_token)
         return new_token, new_input_ids
 
@@ -281,7 +281,7 @@ def init_env_for_agent_training(n_envs: int=1):
 
 ############################################
 
-vec_env = init_env_for_agent_training()
+vec_env = init_env_for_agent_training(n_envs=1)
 
 if algorithm=="PPO":
     model = PPO("MlpPolicy", vec_env, verbose=1, 

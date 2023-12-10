@@ -108,9 +108,9 @@ class LMEnv(gym.Env):
         :return new_input_ids: the new input ids after the perturbation
         """
         # Get the top k predictions （1-10）
-        _, topk_indices = torch.topk(local_logits, perturb_ranking)
+        _, topk_indices = torch.topk(local_logits, self.topK_logistics)
         # Select the last item
-        new_token = topk_indices[0][-1]
+        new_token = topk_indices[0][perturb_ranking]
         new_input_ids = self._cat_new_word(new_token)
         return new_token, new_input_ids
 
@@ -176,7 +176,7 @@ class LMEnv(gym.Env):
         ## perturb: Binary variable perturb -- either 1 or 0
         perturb = (act != 0)
 
-        perturb_ranking = act + 1
+        perturb_ranking = act
 
         # ## perturb_ranking: 10 options -- shift the choice from 0-9 toward 1-10
         # perturb_ranking = action[1] + 1

@@ -49,3 +49,13 @@ def top_k_logits(logits, k):
     values, _ = torch.topk(logits, k)
     min_values = values[:, -1]
     return torch.where(logits < min_values, torch.ones_like(logits, dtype=logits.dtype) * -1e10, logits)
+
+def load_dataset(dataset):
+    print("Dataset:", dataset)
+    d = datasets.load_dataset(dataset, split="train").shuffle(seed=42)
+    filter_fn = lambda rows: [
+        len(a.split(" ")) < 100 for a in rows["document"]
+    ]
+    d = d.filter(filter_fn, batched=True, batch_size=None)
+    d = d["document"][:self.n_train]
+    return dataset

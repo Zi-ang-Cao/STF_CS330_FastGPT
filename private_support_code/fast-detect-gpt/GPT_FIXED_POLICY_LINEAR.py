@@ -15,7 +15,7 @@ import tqdm
 
 
 class LMEnv(gym.Env):
-    def __init__(self, sampling_mode: str = "likelihood", topK_logistics: int=10, dataset: str="xsum", n_train:int = 2048, 
+    def __init__(self, sampling_mode: str = "likelihood", topK_logistics: int=10, dataset: str="xsum", n_train:int = 1, 
     random_seed:int=42, obs_dim:int = 1):
 
         # Dataset
@@ -318,5 +318,5 @@ vec_env = init_env_for_agent_training(n_envs=1)
 if algorithm=="PPO":
     model = PPO("MlpPolicy", vec_env, verbose=1, 
                 tensorboard_log="./tensorboard_log")
-    model.learn(total_timesteps=2E5, tb_log_name=f"{algorithm}/fixedACT_Linear")
+    model.learn(total_timesteps=6E5, tb_log_name=f"{algorithm}/fixedACT_Linear")
     # model.save("FirstAgent")

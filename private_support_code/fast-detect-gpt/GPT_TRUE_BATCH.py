@@ -1,5 +1,6 @@
 from common_helper_batch import *
 
+
 from stable_baselines3.common.monitor import Monitor
 
 
@@ -12,16 +13,14 @@ algorithm = "PPO"
 # If true, infer once with the model
 inference = False
 # If true, save the model
-save = False
+save = True
 # If true, use both reward. Otherwise, only rule reward.
 both_reward = True
 
 rulePenaltyOnly = True
-# Number of environments to simulate
-n_envs = 4
 
 # Tensorboard log names
-RL_model_name = "fixedACT_BATCH"
+RL_model_name = "fixedACT_TRUE_BATCH"
 # "fixedACT_MONITOR_onlyRuleReward"
 
 
@@ -30,6 +29,7 @@ import tqdm
 # import gym
 
 data_items = torch.tensor([127, 733,  55, 953, 469, 628, 793, 511])
+# data_items = torch.tensor([127])
 
 class LMEnv(gym.Env):
     ### NOTE: [CHANGE!!!] change the n_train from 8 to 1
@@ -90,6 +90,19 @@ class LMEnv(gym.Env):
 
         self.reset(random=False, data_items=data_items)
 
+    def _load_datasets(self):
+        print("Dataset:", self.dataset)
+        if self.dataset == "xsum":
+            d = datasets.load_dataset(self.dataset, split="train").shuffle(seed=self.random_seed)
+            filter_fn = lambda rows: [
+                len(a.split(" ")) < 100 for a in rows["document"]
+            ]
+            d = d.filter(filter_fn, batched=True, batch_size=None)
+            d = d["document"][:self.n_train]
+            self.data = d
+        else:
+            raise NotImplementedError
+
     def _feedforward(self, cur_input, attention_mask, past_kvs=None):
         # Change 1: Speed up feedforward by utilizing past_kvs
         """
@@ -104,9 +117,9 @@ class LMEnv(gym.Env):
         with torch.inference_mode():
             # TODO 1: get pad_token_id
             # TODO 2: get attention_mask
-            outputs = self.model(cur_input, 
-                                #  past_key_values=past_kvs, 
-                                 attention_mask=attention_mask, 
+            outputs = self.model(cur_input,
+                                #  past_key_values=past_kvs,
+                                 attention_mask=attention_mask,
                                  # use_cache=True
                                  use_cache=False)
             all_logits = outputs.logits
@@ -127,11 +140,11 @@ class LMEnv(gym.Env):
     def _sample_tokens(self, local_logits, input_ids, attention_mask):
         # Change 2: Return the new token as well as concatenated previous tokens
         """
-        :param local_logits: tensor shape [batch_size, vocab_size] local logits 
+        :param local_logits: tensor shape [batch_size, vocab_size] local logits
          at the last point
         :param input_ids: tensor shape [batch_size, seq_len] input ids at latest
          point
-        :param attention_mask: tensor shape [batch_size, seq_len] attention 
+        :param attention_mask: tensor shape [batch_size, seq_len] attention
          mask at latest point
         :return new_token: tensor shape [batch_size, 1]
         works together with past_kvs returned from get_logits() to feed in the
@@ -196,19 +209,6 @@ class LMEnv(gym.Env):
 
         return topk_values.detach().cpu().numpy(), topk_indices.detach().cpu().numpy()
 
-    def _load_datasets(self):
-        print("Dataset:", self.dataset)
-        if self.dataset == "xsum":
-            d = datasets.load_dataset(self.dataset, split="train").shuffle(seed=self.random_seed)
-            filter_fn = lambda rows: [
-                len(a.split(" ")) < 100 for a in rows["document"]
-            ]
-            d = d.filter(filter_fn, batched=True, batch_size=None)
-            d = d["document"][:self.n_train]
-            self.data = d
-        else:
-            raise NotImplementedError
-
     def _get_new_input(self, items):
         ret = []
         for item in items:
@@ -216,6 +216,9 @@ class LMEnv(gym.Env):
         return ret
 
     def _sample_done(self):
+        """
+        ERROR PRONE: Do not use unless validated.
+        """
         input_ids = self.input_ids[:,-1].unsqueeze(dim=-1)
         stop_tokens = torch.tensor(self.stop_tokens).view(1, -1).to(env_device)
         # print("Token:", token.shape, "Stop Tokens:", stop_tokens.shape)
@@ -225,10 +228,13 @@ class LMEnv(gym.Env):
 
         b = self.input_ids.shape[1] >= self.max_sample_tokens
         b = torch.tensor(b).repeat((self.batch_size)).to(env_device)
-        print("Done:", a, input_ids[0][0], stop_tokens, b)
+        # print("Done:", a, input_ids[0][0], stop_tokens, b)
         return a | b
 
     def _masked(self, a, b, mask):
+        """
+        ERROR PRONE: Do not use unless validated.
+        """
         if a is None:
             return b
         else:
@@ -283,7 +289,7 @@ class LMEnv(gym.Env):
             initial_texts = self._get_new_input(self.data_items)
             be = self.tok(initial_texts,
                           return_tensors="pt",
-                          padding=True, 
+                          padding=True,
                           return_attention_mask=True)
             self.input_ids = self._masked(self.input_ids,
                         be["input_ids"]
@@ -304,6 +310,7 @@ class LMEnv(gym.Env):
         self.input_ids = new_input_ids
         self.attention_mask = new_attention_mask
 
+        self.max_sample_tokens = max_sample_tokens
         if self.input_ids.shape[-1] + 20 > self.max_sample_tokens:
           self.max_sample_tokens = self.input_ids.shape[-1] + 20
 
@@ -332,7 +339,7 @@ class LMEnv(gym.Env):
         :param data_items: if random == False, choose these data items in the dataset
         :param mask: only reset these rows in the batch
         """
-        print("Reset begins...")
+        print("Reset All begins...", random, data_items)
         if random:
             data_items = torch.randint(low=0, high=self.n_train, size=(self.batch_size,)).to(env_device)
         self.data_items = data_items
@@ -361,9 +368,6 @@ class LMEnv(gym.Env):
         self.last_logits = local_logits
         self.past_kvs = new_past_kvs
 
-        if self.input_ids.shape[-1] + 20 > self.max_sample_tokens:
-          self.max_sample_tokens = self.input_ids.shape[-1] + 20
-
         self.sample_done = self.zero_tensor.clone().detach().bool()
 
         _, new_input_ids, new_attention_mask = self._sample_tokens(local_logits, self.input_ids, self.attention_mask)
@@ -377,6 +381,11 @@ class LMEnv(gym.Env):
         self.input_ids_unperturbed = self.input_ids
         self.attention_mask_unperturbed = self.attention_mask
 
+        self.max_sample_tokens = max_sample_tokens
+        if self.input_ids.shape[-1] + 20 > self.max_sample_tokens:
+          self.max_sample_tokens = self.input_ids.shape[-1] + 20
+        
+        print("Max tokens:", self.max_sample_tokens)
 
         obs, _ = self._obs_wrapper(all_logits)
 
@@ -389,7 +398,7 @@ class LMEnv(gym.Env):
                       "RL_num_perturb": self.zero_tensor.clone().detach(),
                       "last_reward": self.zero_tensor.clone().detach(),
                       }
-        print("Reset ends!")
+        print("Reset All ends!")
         # print(obs, reset_info)
         return obs, reset_info
 
@@ -480,12 +489,12 @@ class LMEnv(gym.Env):
         """
         :param action: bool tensor of shape [batch_size]
         """
-        
+
         reward = self.zero_tensor.clone().detach()
         F_GPT_Score_drop = self.zero_tensor.clone().detach().float()
         RL_num_perturb = self.zero_tensor.clone().detach().long()
 
-        
+
 
         # Parse Action
         obs, done = self._step_sample(perturb=action)
@@ -511,26 +520,27 @@ class LMEnv(gym.Env):
         ## NOTE: save the past obs
         self.past_obs = obs
 
-        # print(done, self._sample_done())
 
         self.sample_done = self.sample_done | done
         if self.input_ids.shape[1] >= self.max_sample_tokens:
           self.sample_done = self.one_tensor.clone().detach().to(env_device)
+        print("Done:", self.sample_done)
+
         # done = done | self._sample_done()
         self.output_mask = torch.cat(
-                    [self.output_mask, 
-                     torch.logical_not(self.sample_done).unsqueeze(dim=1)], 
+                    [self.output_mask,
+                     torch.logical_not(self.sample_done).unsqueeze(dim=1)],
                     dim=-1)
         self.input_mask = torch.cat(
-                    [self.input_mask, 
-                     torch.zeros_like(self.sample_done).int().unsqueeze(dim=1)], 
+                    [self.input_mask,
+                     torch.zeros_like(self.sample_done).int().unsqueeze(dim=1)],
                     dim=-1)
 
         fake_reward = reward
         # print("Output Mask:", self.output_mask)
 
         if torch.all(self.sample_done):
-            
+
             mask = self.input_mask | torch.logical_not(self.output_mask)
             perturbed_score = detector.infer(self.get_texts(mask))
 
@@ -546,7 +556,7 @@ class LMEnv(gym.Env):
                   "FGPT score drop:", F_GPT_Score_drop)
             fake_reward += 100 * F_GPT_Score_drop
             # fake_reward -= 0.01 * RL_num_perturb * RL_num_perturb / 2
-            
+
 
         info = {"TimeLimit.truncated": self.zero_tensor.clone().detach().bool().to(env_device),
                 "F_GPT_Score_drop": F_GPT_Score_drop,
@@ -628,9 +638,10 @@ class MyVecEnv(VecEnv):
 
     def __init__(self, lm_env:LMEnv):
         self.env = lm_env
-        super().__init__(self.env.batch_size, 
-                         self.env.observation_space, 
+        super().__init__(self.env.batch_size,
+                         self.env.observation_space,
                          self.env.action_space)
+        self.num_envs = self.env.batch_size
         obs_space = env.observation_space
         self.keys, shapes, dtypes = obs_space_info(obs_space)
 
@@ -639,12 +650,41 @@ class MyVecEnv(VecEnv):
         self.buf_rews = np.zeros((self.num_envs,), dtype=np.float32)
         self.buf_infos: List[Dict[str, Any]] = [{} for _ in range(self.num_envs)]
         self.metadata = env.metadata
+        self.counter = 0
 
     def step_async(self, actions: np.ndarray) -> None:
         self.actions = actions
 
+    def step_without_reset(self):
+        obs, self.buf_rews, terminated, truncated, buf_infos = self.env.step(
+            torch.tensor(self.actions).bool().to(env_device)
+        )
+        # print(self.actions, obs)
+        # convert to SB3 VecEnv api
+        # if type(terminated) is not float:
+        #   print(type(terminated), type(truncated))
+        #   self.buf_dones = terminated | truncated
+        # else:
+        self.buf_dones = terminated
+        # See https://github.com/openai/gym/issues/3102
+        # Gym 0.26 introduces a breaking change
+        for i in range(self.env.batch_size):
+          buf_infos_i = {}
+          for k, v in buf_infos.items():
+            buf_infos_i[k] = v[i]
+          self.buf_infos[i] = buf_infos_i
+
+        self._save_obs(obs)
+        res = (self._obs_from_buf(), 
+               np.copy(self.buf_rews.cpu()), 
+               np.copy(self.buf_dones.bool().cpu()), 
+               deepcopy(self.buf_infos))
+        # print("Action:", self.actions, "Reward:", res[1], "Dones:", res[2], "Infos:", res[3], "Buf Info:", buf_infos)
+        return res
+
     def step_wait(self) -> VecEnvStepReturn:
-        # print("Step")
+        self.counter += 1
+        print("Step ", self.counter)
         obs, self.buf_rews, terminated, truncated, buf_infos = self.env.step(
             torch.tensor(self.actions).bool().to(env_device)
         )
@@ -670,19 +710,28 @@ class MyVecEnv(VecEnv):
             print("Resetting 1")
             for i in range(self.env.batch_size):
               self.buf_infos[i]["terminal_observation"] = obs[i]
-            obs, self.reset_infos = self.env.reset()
+            obs, self.reset_infos = self.env.reset(random=False, 
+                                                   data_items=data_items)
+            # obs, self.reset_infos = self.env.reset(random=True)
             print(np.copy(self.buf_dones.bool().cpu()))
         self._save_obs(obs)
-        res = (self._obs_from_buf(), np.copy(self.buf_rews.cpu()), np.copy(self.buf_dones.bool().cpu()), deepcopy(self.buf_infos))
+        res = (self._obs_from_buf(), 
+               np.copy(self.buf_rews.cpu()), 
+               np.copy(self.buf_dones.bool().cpu()), 
+               deepcopy(self.buf_infos))
         # print("Action:", self.actions, "Reward:", res[1], "Dones:", res[2], "Infos:", res[3], "Buf Info:", buf_infos)
         return res
 
     def reset(self) -> VecEnvObs:
-        
+
         # maybe_options = {"options": self._options} if self._options else {}
         # obs, self.reset_infos = self.env.reset(seed=self._seeds, **maybe_options)
         print("Resetting 2")
-        obs, self.reset_infos = self.env.reset(seed=self._seeds)
+        obs, self.reset_infos = self.env.reset(seed=self._seeds, 
+                                               random=False, 
+                                               data_items=data_items)
+        # obs, self.reset_infos = self.env.reset(seed=self._seeds, 
+        #                                        random=True)
         print(obs.shape)
         self._save_obs(obs)
         # Seeds and options are only used once
@@ -751,7 +800,6 @@ class MyVecEnv(VecEnv):
     #     return [self.envs[i] for i in indices]
 
 
-
 from stable_baselines3 import PPO, DQN
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback, BaseCallback
 from stable_baselines3.common.utils import obs_as_tensor, safe_mean, set_random_seed
@@ -762,7 +810,9 @@ from stable_baselines3.common.vec_env.dummy_vec_env import DummyVecEnv
 
 from stable_baselines3.common.env_checker import check_env
 
-def init_env_for_agent_training(n_envs: int=1):
+
+
+def init_env_for_agent_training(env):
     return MyVecEnv(env)
 
 
@@ -818,26 +868,29 @@ class TensorboardCallback(BaseCallback):
             self.logger.record("rollout/last_reward", last_reward)
 
         return True
-        
+
         # return False
-        
+
 
 cust_callback = TensorboardCallback()
 
+
+
 ############################################
 if __name__ == "__main__":
-    vec_env = init_env_for_agent_training(n_envs=n_envs)
+    env = LMEnv(sampling_mode="likelihood")
+    vec_env = init_env_for_agent_training(env=env)
 
 
     if algorithm=="PPO":
-        model = PPO("MlpPolicy", vec_env, verbose=1, 
+        model = PPO("MlpPolicy", vec_env, verbose=1,
                     tensorboard_log="./tensorboard_log")
-        model.learn(total_timesteps=1, tb_log_name=f"{algorithm}/{model_name}") 
-        # model.learn(total_timesteps=1, tb_log_name=f"{algorithm}/{RL_model_name}", 
+        model.learn(total_timesteps=60000, tb_log_name=f"{algorithm}/{model_name}")
+        # model.learn(total_timesteps=1, tb_log_name=f"{algorithm}/{RL_model_name}",
                     # callback=cust_callback)
         if save:
             model.save(f"{algorithm}/{RL_model_name}")
-        
+
         if inference:
             if save:
                 model = PPO.load(f"{algorithm}/{RL_model_name}")
@@ -845,17 +898,26 @@ if __name__ == "__main__":
             done = False
             while not done:
                 action, _ = model.predict(obs)
-                obs, reward, done, info = vec_env.step(action)
-            
-            print(vec_env.env_method("get_text"))
+                vec_env.step_async(action)
+                obs, reward, done, info = vec_env.step_without_reset()
+                print(done)
+                done = done.all()
+            texts = env.get_texts(mask = env.input_mask | torch.logical_not(env.output_mask))
+            texts_unperturbed = env.get_texts_unperturbed(mask = env.input_mask | torch.logical_not(env.output_mask))
+            for i, text in enumerate(texts):
+                print(i, text)
+            print("======")
+            for i, text in enumerate(texts_unperturbed):
+                print(i, text)
+            print(detector.infer(texts), detector.infer(texts_unperturbed))
     elif algorithm == "DQN":
-        model = DQN("MlpPolicy", vec_env, verbose=1, 
+        model = DQN("MlpPolicy", vec_env, verbose=1,
                     tensorboard_log="./tensorboard_log")
-        model.learn(total_timesteps=1, tb_log_name=f"{algorithm}/{RL_model_name}")
+        model.learn(total_timesteps=10240, tb_log_name=f"{algorithm}/{RL_model_name}")
         # model.save("FirstAgent")
         if save:
             model.save(f"{algorithm}/{RL_model_name}")
-        
+
         if inference:
             if save:
                 model = DQN.load(f"{algorithm}/{RL_model_name}")
@@ -863,6 +925,15 @@ if __name__ == "__main__":
             done = False
             while not done:
                 action, _ = model.predict(obs)
-                obs, reward, done, info = vec_env.step(action)
-            
-            print(vec_env.env_method("get_text"))
+                vec_env.step_async(action)
+                obs, reward, done, info = vec_env.step_without_reset()
+                print(done)
+                done = done.all()
+            texts = env.get_texts(mask = env.input_mask | torch.logical_not(env.output_mask))
+            texts_unperturbed = env.get_texts_unperturbed(mask = env.input_mask | torch.logical_not(env.output_mask))
+            for i, text in enumerate(texts):
+                print(i, text)
+            print("======")
+            for i, text in enumerate(texts_unperturbed):
+                print(i, text)
+            print(detector.infer(texts), detector.infer(texts_unperturbed))
