@@ -2,6 +2,8 @@ import torch
 import transformers
 from typing import List
 
+from typing import List, Set
+
 def model2hfname(model: str) -> str:
     return {
         "bert-tiny": "prajjwal1/bert-tiny",
@@ -36,12 +38,29 @@ def get_model_and_tokenizer(model: str, Cls = transformers.AutoModelForCausalLM,
     return m, tok
 
 
-def stop_tokens(tokenizer, stop_string: str = ".") -> List[int]:
+def stop_tokens(tokenizer, stop_strings: Set[str] = set([])) -> List[int]:
     tokens = []
     for idx in range(len(tokenizer)):
-        if tokenizer.decode(idx) == stop_string:
+        if tokenizer.decode(idx) in stop_strings:
             tokens.append(idx)
+    print("Stop tokens:", tokens)
     return tokens
+
+def ignore_tokens(tokenizer, stop_strings: Set[str] = set("\n")) -> List[int]:
+    tokens = []
+    for idx in range(len(tokenizer)):
+        if tokenizer.decode(idx) in stop_strings:
+            tokens.append(idx)
+    print("Ignore tokens:", tokens)
+    return tokens
+
+def ignore_tokens_replace(tokenizer, stop_strings: Set[str] = set(" ")) -> List[int]:
+    tokens = []
+    for idx in range(len(tokenizer)):
+        if tokenizer.decode(idx) in stop_strings:
+            tokens.append(idx)
+    print("Ignore tokens replaced by:", tokens)
+    return tokens[0]
 
 def top_k_logits(logits, k):
     if k == 0:
@@ -49,13 +68,3 @@ def top_k_logits(logits, k):
     values, _ = torch.topk(logits, k)
     min_values = values[:, -1]
     return torch.where(logits < min_values, torch.ones_like(logits, dtype=logits.dtype) * -1e10, logits)
-
-def load_dataset(dataset):
-    print("Dataset:", dataset)
-    d = datasets.load_dataset(dataset, split="train").shuffle(seed=42)
-    filter_fn = lambda rows: [
-        len(a.split(" ")) < 100 for a in rows["document"]
-    ]
-    d = d.filter(filter_fn, batched=True, batch_size=None)
-    d = d["document"][:self.n_train]
-    return dataset
