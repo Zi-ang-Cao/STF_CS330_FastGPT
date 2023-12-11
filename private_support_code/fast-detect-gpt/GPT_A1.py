@@ -17,8 +17,6 @@ from stable_baselines3.common.env_checker import check_env
 
 
 class LMEnv(gym.Env):
-    ### NOTE: [CHANGE!!!] change the n_train from 8 to 1
-    ### NOTE: [CHANGE!!!] change the sampling_mode from "likelihood" to "argmax"
     def __init__(self, args, sampling_mode: str = "argmax", topK_logistics: int=10, dataset: str="xsum", n_train:int = 1, 
     random_seed:int=42, obs_dim:int = 1, overfit_sentence_idx=-1):
         
@@ -68,16 +66,12 @@ class LMEnv(gym.Env):
 
     
     def _feedforward(self, cur_input, past_kvs=None):
-        # Change 1: Speed up feedforward by utilizing past_kvs
         """
         :param cur_input: When past_kvs = None, tensor shape [batch_size, seq_len]. When past_kvs is not None, tensor shape [batch_size, 1]
         :param past_kvs: a cache to speed up model inference
         :return local_logits: tensor shape [batch_size, vocab_size] local logits at the last point
         :return new_past_kvs: the new model state cache
         """
-        # print("cur_input: ", cur_input.shape)
-        # if cur_input.shape[-1] ==0:
-        #     input()
         with torch.inference_mode():
             outputs = self.model(cur_input, past_key_values=past_kvs, use_cache=True)
             all_logits = outputs.logits
@@ -94,7 +88,6 @@ class LMEnv(gym.Env):
         return torch.cat((self.input_ids, sampled_token.clone().detach().long().expand(1, 1)), dim=1)    
     
     def _sample_tokens(self, local_logits):
-        # Change 2: Return the new token as well as concatenated previous tokens
         """
         :param local_logits: tensor shape [batch_size, vocab_size] local logits at the last point
         :return new_token: works together with past_kvs returned from get_logits() to feed in the next round of get_logits().
@@ -103,9 +96,7 @@ class LMEnv(gym.Env):
         if self.sampling_mode == "argmax":
             sampled_token = torch.argmax(local_logits, dim=-1)
         elif self.sampling_mode == "likelihood":
-            # print(local_logits.shape, x.shape)
             sampled_token = torch.multinomial(F.softmax(local_logits, dim=-1), num_samples=1).squeeze(dim=1)
-            # sampled_token = torch.multinomial(x, num_samples=1).squeeze(dim=1)
         else:
             raise NotImplementedError
         
@@ -140,14 +131,14 @@ class LMEnv(gym.Env):
 
     def _obs_wrapper(self, all_logits):
         # Sorted topk_values
-        ## NOTE: Detect End of Sentence
+        ## Detect End of Sentence
         topk_values, topk_indices = torch.topk(all_logits, self.topK_logistics, dim=-1)
         # Normalize the topk_values
         topk_values = F.softmax(topk_values, dim=-1)
         # Remove batch dim
         topk_values = topk_values.squeeze(dim=0)
 
-        ## NOTE: Check the first token is in stop_tokens
+        ## Check the first token is in stop_tokens
         topk_indices = topk_indices.squeeze(dim=0)
 
         return topk_values.detach().cpu().numpy(), topk_indices.detach().cpu().numpy()
@@ -206,7 +197,7 @@ class LMEnv(gym.Env):
 
         obs, _ = self._obs_wrapper(all_logits)
 
-        ## NOTE: save the past obs
+        ## save the past obs
         self.past_obs = obs
 
         reset_info = {"TimeLimit.truncated": False,
@@ -239,7 +230,7 @@ class LMEnv(gym.Env):
         else:
             # _, perturbed_output = self._perturb_tokens(self.last_logits, perturb_mode="random")
 
-            # NOTE: Change the perturb mode to chosen
+            # Change the perturb mode to chosen
             _, perturbed_output = self._perturb_tokens(self.last_logits, perturb_mode="chosen", perturb_ranking=3)
 
 
@@ -301,7 +292,7 @@ class LMEnv(gym.Env):
                         reward -= ruleBasedPenalty
 
         
-        ## NOTE: save the past obs
+        ## save the past obs
         self.past_obs = obs
 
         done = done or self._sample_done()
@@ -321,11 +312,10 @@ class LMEnv(gym.Env):
 
             F_GPT_Score_drop = 100. * (unperturbed_score - perturbed_score)
 
-            # NOTE: Reward
+            # Reward
             last_reward += 10 * F_GPT_Score_drop
             last_reward -= 0.01 * RL_num_perturb * RL_num_perturb / 2
-        #     # Negative reward grows by O(N^2)
-        #     reward -= 0.1 * self.num_perturb * (self.num_perturb - 1) / 2
+        #     Negative reward grows by O(N^2)
         
         reward += last_reward
 
@@ -341,7 +331,6 @@ class LMEnv(gym.Env):
         truncated = done
         
         return obs, reward, done, truncated, info
-        # return obs, reward, done, info
 
     
     def seed(self, seed=None):
@@ -441,11 +430,9 @@ class TensorboardCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         # Log scalar value (here a random variable)
-        # success_rate = self.training_env.get_success_rate(window_size=100)
         if len(self.model.ep_info_buffer) > 0 and len(self.model.ep_info_buffer[0]) > 0:
             # import pdb; pdb.set_trace()
             F_GPT_Score_drop = safe_mean([ep_info["F_GPT_Score_drop"] for ep_info in self.model.ep_info_buffer])
-            # self.logger.record("rollout/F_GPT_Score_drop", F_GPT_Score_drop)
             self.logger.record("rollout/F_GPT_Score_drop", F_GPT_Score_drop)
 
             RL_num_perturb = safe_mean([ep_info["RL_num_perturb"] for ep_info in self.model.ep_info_buffer])
@@ -470,10 +457,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--total_timesteps", default=1.5E5, type=int)
 
-    
-    # --overfit_sentence_idx 1
     parser.add_argument("--overfit_sentence_idx", default=0, type=int)
-
 
     parser.add_argument("--model_name", default="med", type=str)
     parser.add_argument("--env_device", default="cuda", type=str)
@@ -481,7 +465,6 @@ if __name__ == "__main__":
     parser.add_argument("--algorithm", default="PPO", type=str)
 
     parser.add_argument("--tb_folder", default="./tensorboard_log", type=str)
-
 
     parser.add_argument("--inference", default=True, type=bool)
     parser.add_argument("--save", default=True, type=bool)
@@ -531,9 +514,6 @@ if __name__ == "__main__":
 
     cust_callback = TensorboardCallback()
 
-    # checkpoint_callback = CheckpointCallback(save_freq=1, save_path='./model_checkpoints/')
-
-
     ############################################
 
     vec_env = init_env_for_agent_training(args, n_envs=args.num_env)
@@ -564,7 +544,6 @@ if __name__ == "__main__":
         if args.inference:
             if args.save:
                 model = PPO.load(f"{args.algorithm}/{args.RL_model_name}_T_{args.total_timesteps}.pt")
-                # model = PPO.load(f"{args.algorithm}/{args.RL_model_name}")
 
             #### RL Policy + GPT2 ####
             obs = vec_env.reset()
@@ -573,14 +552,6 @@ if __name__ == "__main__":
                 action, _ = model.predict(obs)
                 obs, reward, done, info = vec_env.step(action)
             print("RL Policy + GPT2: ", vec_env.env_method("get_text"))
-
-
-            # #### Backbone GPT ####
-            # obs = vec_env.unwrapped.reset()
-            # while not vec_env.unwrapped._sample_done():
-            #     vec_env.unwrapped._step_sample(perturb=False)
-            # print("Only GPT2: ", vec_env.unwrapped.get_text())
-
 
     ### DQN ###
     elif args.algorithm=="DQN":
@@ -603,12 +574,3 @@ if __name__ == "__main__":
                 action, _ = model.predict(obs)
                 obs, reward, done, info = vec_env.step(action)
             print("RL Policy + GPT2: ", vec_env.env_method("get_text"))
-
-
-            # #### Backbone GPT ####
-            # obs = vec_env.reset()
-            # done = False
-            # while not done:
-            #     action, _ = model.predict(obs)
-            #     obs, reward, done, info = vec_env.step(False)
-            # print("Only GPT2: ", vec_env.env_method("get_text"))

@@ -4,8 +4,6 @@ import gymnasium as gym
 import tqdm
 
 class LMEnv(gym.Env):
-    ### NOTE: [CHANGE!!!] change the n_train from 8 to 1
-    ### NOTE: [CHANGE!!!] change the sampling_mode from "likelihood" to "argmax"
     def __init__(self, args):
 
         self.args=args
@@ -188,8 +186,6 @@ class LMEnv(gym.Env):
         """
         input_ids = self.input_ids[:,-1].unsqueeze(dim=-1)
         stop_tokens = torch.tensor(self.stop_tokens).view(1, -1).to(self.args.env_device)
-        # print("Token:", token.shape, "Stop Tokens:", stop_tokens.shape)
-        # (batch_size=1, topk=10) & (num_stop_tokens=2)
 
         a = torch.any(torch.eq(input_ids, stop_tokens))
 
@@ -473,11 +469,8 @@ class LMEnv(gym.Env):
         penalized_high = (torch.logical_not(action) & torch.tensor(obs[:,-1, 0] > 0.55).to(self.args.env_device)).bool()
         reward[penalized_low] -= rule_based_penalty
         reward[penalized_high] -= rule_based_penalty
-        # print(action, not_done, self.num_perturb)
 
-        ## NOTE: save the past obs
         self.past_obs = obs
-
 
         self.sample_done = self.sample_done | done
         if self.input_ids.shape[1] >= self.max_sample_tokens:
@@ -519,8 +512,6 @@ class LMEnv(gym.Env):
         # If your environment does not have a concept of truncation, you can set truncated to the same value as done
         truncated = self.sample_done.bool()
         return obs, reward, self.sample_done, truncated, info
-        # return obs, reward, done, info
-
 
     def seed(self, seed=None):
         self._seed = seed
@@ -586,10 +577,8 @@ parser.add_argument("--algorithm", default="PPO", type=str)
 
 parser.add_argument("--tb_folder", default="./tensorboard_log", type=str)
 
-
 parser.add_argument("--inference", default=False, type=bool)
 parser.add_argument("--save", default=True, type=bool)
-
 
 parser.add_argument("--rule_based_penalty", action='store_true', default=False)
 
@@ -653,15 +642,7 @@ class MyVecEnv(VecEnv):
         obs, self.buf_rews, terminated, truncated, buf_infos = self.env.step(
             torch.tensor(self.actions).bool().to(self.env.args.env_device)
         )
-        # print(self.actions, obs)
-        # convert to SB3 VecEnv api
-        # if type(terminated) is not float:
-        #   print(type(terminated), type(truncated))
-        #   self.buf_dones = terminated | truncated
-        # else:
         self.buf_dones = terminated
-        # See https://github.com/openai/gym/issues/3102
-        # Gym 0.26 introduces a breaking change
         for i in range(self.env.batch_size):
           buf_infos_i = {}
           for k, v in buf_infos.items():
@@ -673,7 +654,6 @@ class MyVecEnv(VecEnv):
                np.copy(self.buf_rews.cpu()),
                np.copy(self.buf_dones.bool().cpu()),
                deepcopy(self.buf_infos))
-        # print("Action:", self.actions, "Reward:", res[1], "Dones:", res[2], "Infos:", res[3], "Buf Info:", buf_infos)
         return res
 
     def step_wait(self) -> VecEnvStepReturn:
@@ -711,8 +691,6 @@ class MyVecEnv(VecEnv):
         print("Resetting 2")
         obs, self.reset_infos = self.env.reset(seed=self._seeds,
                                                random=self.random)
-        # obs, self.reset_infos = self.env.reset(seed=self._seeds,
-        #                                        random=True)
         print(obs.shape)
         self._save_obs(obs)
 
@@ -772,7 +750,6 @@ class MyVecEnv(VecEnv):
 
     def env_is_wrapped(self, wrapper_class: Type[gym.Wrapper], indices: VecEnvIndices = None) -> List[bool]:
         """Check if worker environments are wrapped with a given wrapper"""
-        # target_envs = self._get_target_envs(indices)
         # Import here to avoid a circular import
         from stable_baselines3.common import env_util
         return [env_util.is_wrapped(self.env, wrapper_class) for _ in self._get_indices(indices)]
@@ -851,7 +828,6 @@ if __name__ == "__main__":
 
     vec_env = init_env_for_agent_training(args=args)
 
-
     if args.algorithm=="PPO":
         model = PPO("MlpPolicy", vec_env, verbose=1,
                     tensorboard_log=args.tb_folder)
@@ -864,8 +840,6 @@ if __name__ == "__main__":
 
         model.learn(total_timesteps=args.total_timesteps, 
                     tb_log_name=tb_log_name)
-        # model.learn(total_timesteps=1, tb_log_name=f"{algorithm}/{RL_model_name}",
-                    # callback=[cust_callback, checkpoint_callback])
         if args.save:
             model.save(f"{args.algorithm}/{args.RL_model_name}_T_{args.total_timesteps}.pt")
     else:
