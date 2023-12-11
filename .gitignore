@@ -1,5 +1,12 @@
 cache/
-
+private_support_code/fast-detect-gpt/tensorboard_log/
+private_support_code/fast-detect-gpt/tensorboard_log_2/
+private_support_code/fast-detect-gpt/CS330_FastGPT_med_cuda/
+private_support_code/fast-detect-gpt/PPO/
+private_support_code/fast-detect-gpt/PPO_prior/
+private_support_code/fast-detect-gpt/tensorboard_Infer/
+private_support_code/fast-detect-gpt/conf/
+src/Backup_src/
 
 *.pyc
 *.zip
