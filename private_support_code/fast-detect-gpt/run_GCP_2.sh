@@ -1,0 +1,1 @@
+python3 GPT_TRUE_BATCH_A1_CALLBACK.py  --data_items="127,733,55,953,469,628,793,511" --batch_size=8 --total_timesteps=2000000 --retrain_from="./PPO/CT_S_127,733,55,953,469,628,793,511_RP_False_1224_070648_T_2000000.pt"
